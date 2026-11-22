@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Medicine Supply Management</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1f2937; }
+  header { background: #0f766e; color: #fff; padding: 14px 24px; font-weight: 600; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; max-width: 1100px; margin: auto; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  section { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  h2 { margin: 0 0 10px; font-size: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid #eee; }
+  .low { color: #b91c1c; font-weight: 600; }
+  #log { height: 320px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; margin-bottom: 8px; white-space: pre-wrap; font-size: 14px; }
+  .u { color: #0f766e; margin: 6px 0; } .b { margin: 6px 0; }
+  form { display: flex; gap: 8px; } input { flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; }
+  button { background: #0f766e; color: #fff; border: 0; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
+  #toast { position: fixed; right: 16px; bottom: 16px; background: #b91c1c; color: #fff; padding: 10px 14px; border-radius: 8px; display: none; }
+</style>
+</head>
+<body>
+<header>Medicine Supply Management System</header>
+<main>
+  <section>
+    <h2>Low-stock alerts (live)</h2>
+    <table><thead><tr><th>Medicine</th><th>In stock</th><th>Reorder at</th></tr></thead><tbody id="low"></tbody></table>
+  </section>
+  <section>
+    <h2>Inventory assistant</h2>
+    <div id="log"><div class="b">Ask me about stock, alternatives, suppliers or expiring medicines.</div></div>
+    <form id="chat"><input id="msg" placeholder="e.g. Is Crocin 650 available? Alternatives to Augmentin 625?" autocomplete="off" /><button>Send</button></form>
+  </section>
+</main>
+<div id="toast"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const history = [];
+  const log = document.getElementById('log');
+  const add = (cls, text) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; log.appendChild(d); log.scrollTop = log.scrollHeight; };
+
+  async function loadLow() {
+    const rows = await (await fetch('/api/medicines/alerts/low-stock')).json();
+    document.getElementById('low').innerHTML = rows.map(m =>
+      `<tr><td>${m.name}</td><td class="low">${m.quantityInStock}</td><td>${m.reorderLevel}</td></tr>`).join('') || '<tr><td colspan="3">All stocked</td></tr>';
+  }
+  loadLow();
+
+  const socket = io();
+  socket.on('stock:updated', loadLow);
+  socket.on('stock:low', (m) => {
+    const t = document.getElementById('toast');
+    t.textContent = `Low stock: ${m.name} (${m.quantityInStock} left)`;
+    t.style.display = 'block'; setTimeout(() => (t.style.display = 'none'), 4000);
+  });
+
+  document.getElementById('chat').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('msg');
+    const message = input.value.trim(); if (!message) return;
+    input.value = ''; add('u', 'You: ' + message);
+    try {
+      const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, history }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      add('b', 'Bot: ' + data.reply);
+      history.push({ role: 'user', content: message }, { role: 'assistant', content: data.reply });
+    } catch (err) { add('b', 'Error: ' + err.message); }
+  });
+</script>
+</body>
+</html>
